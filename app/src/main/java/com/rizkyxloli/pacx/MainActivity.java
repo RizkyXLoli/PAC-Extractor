@@ -33,12 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/**
- * PAC Extractor — membongkar firmware .pac Unisoc dan mengambil partisi pilihan.
- * Tanpa fitur flashing, tanpa bypass: hanya membaca dan mengekstrak.
- */
 public class MainActivity extends Activity {
-
     private static final int REQ_PAC = 1001;
     private static final int REQ_DIR = 1002;
     private static final int REQ_REPL = 1003;
@@ -57,9 +52,8 @@ public class MainActivity extends Activity {
     private ScrollView listScroll;
     private EditText etName;
 
-    /** true = mode susun ulang (.pac), false = mode bongkar */
     private boolean repackMode;
-    /** entri yang isinya akan diganti file pilihan pengguna */
+
     private PacParser.Entry replEntry;
     private Uri replUri;
     private String replName = "";
@@ -69,7 +63,6 @@ public class MainActivity extends Activity {
     private String pacName = "";
     private PacParser.Pac pac;
 
-    /** checkbox per entri berdata, urut sesuai tabel PAC */
     private final Map<PacParser.Entry, CheckBox> boxes = new LinkedHashMap<>();
 
     private volatile boolean cancelFlag;
@@ -86,7 +79,6 @@ public class MainActivity extends Activity {
         }
         log("PAC Extractor siap. Pilih file .pac untuk mulai.");
 
-        // dibuka dari file manager (VIEW)
         Uri fromIntent = getIntent() == null ? null : getIntent().getData();
         if (fromIntent != null) {
             pacUri = fromIntent;
@@ -95,8 +87,6 @@ public class MainActivity extends Activity {
             openPac();
         }
     }
-
-    // ------------------------------------------------------------------- UI
 
     private View buildUi() {
         LinearLayout root = new LinearLayout(this);
@@ -123,7 +113,6 @@ public class MainActivity extends Activity {
         btnPickPac.setOnClickListener(v -> pickPac());
         root.addView(btnPickPac);
 
-        // pemilih mode: bongkar atau susun ulang
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
         btnModeExtract = mkBtn("Bongkar", 0xFF16A34A);
@@ -152,7 +141,6 @@ public class MainActivity extends Activity {
         tvInfo.setVisibility(View.GONE);
         root.addView(tvInfo);
 
-        // tombol pintasan pilih
         LinearLayout quick = new LinearLayout(this);
         quick.setOrientation(LinearLayout.HORIZONTAL);
         btnAll = mkBtn("Semua", 0xFF334155);
@@ -170,7 +158,6 @@ public class MainActivity extends Activity {
         btnAll.setOnClickListener(v -> setAll(true));
         btnNone.setOnClickListener(v -> setAll(false));
         btnSafe.setOnClickListener(v -> {
-            // pilih partisi kecil saja — lewati Super/userdata yang raksasa
             for (Map.Entry<PacParser.Entry, CheckBox> e : boxes.entrySet()) {
                 String id = e.getKey().label().toLowerCase(Locale.ROOT);
                 boolean big = id.contains("super") || id.contains("userdata")
@@ -194,7 +181,6 @@ public class MainActivity extends Activity {
         btnPickDir.setOnClickListener(v -> pickDir());
         root.addView(btnPickDir);
 
-        // ---- panel khusus susun ulang
         repackPanel = new LinearLayout(this);
         repackPanel.setOrientation(LinearLayout.VERTICAL);
         repackPanel.setVisibility(View.GONE);
@@ -276,8 +262,6 @@ public class MainActivity extends Activity {
         btnRepack.setAlpha(ok ? 1f : 0.45f);
     }
 
-    // ---------------------------------------------------------------- pilih
-
     private void pickReplacement() {
         if (pac == null) { toast("Pilih file .pac dulu"); return; }
         if (replEntry == null) { toast("Ketuk dulu nama partisi di daftar"); return; }
@@ -304,7 +288,6 @@ public class MainActivity extends Activity {
         renderList();
     }
 
-    /** Nama default hasil: <nama asli tanpa .pac>_repack.pac */
     private String defaultRepackName() {
         String n = pacName == null || pacName.isEmpty() ? "firmware" : pacName;
         if (n.toLowerCase(Locale.US).endsWith(".pac")) n = n.substring(0, n.length() - 4);
@@ -496,9 +479,6 @@ public class MainActivity extends Activity {
         return n == null ? "firmware.pac" : n;
     }
 
-    // ----------------------------------------------------------------- parse
-
-    /** Tutup sumber PAC yang sedang terbuka supaya tidak bocor file descriptor. */
     private void closePac() {
         if (pac != null && pac.source != null) {
             try { pac.source.close(); } catch (Exception ignored) { }
@@ -538,7 +518,7 @@ public class MainActivity extends Activity {
                 final long fms = ms;
                 final Source fs = src;
                 ui.post(() -> {
-                    if (gen != parseGen) {          // pengguna sudah pilih file lain
+                    if (gen != parseGen) {
                         try { fs.close(); } catch (Exception ignored) { }
                         return;
                     }
@@ -581,7 +561,6 @@ public class MainActivity extends Activity {
         updateButtons();
     }
 
-    /** Bangun daftar partisi; pada mode susun ulang baris bisa diketuk jadi target penggantian. */
     private int renderList() {
         boxes.clear();
         listBox.removeAllViews();
@@ -612,7 +591,6 @@ public class MainActivity extends Activity {
             cb.setPadding(dp(2), dp(6), dp(2), dp(2));
 
             if (repackMode) {
-                // mode susun ulang: centang tidak dipakai, ketuk = pilih target
                 cb.setChecked(false);
                 cb.setEnabled(false);
                 final PacParser.Entry fe = e;
@@ -634,8 +612,6 @@ public class MainActivity extends Activity {
                     cb.setTextColor(0xFF94A3B8);
                 }
             } else {
-                // partisi raksasa tidak dicentang otomatis supaya tidak ekstrak 7 GB
-                // tanpa sengaja; pengguna bisa mencentang sendiri
                 boolean huge = e.size > 1024L * 1024 * 1024;
                 cb.setChecked(!huge);
                 if (!huge) autoChecked++;
@@ -662,8 +638,6 @@ public class MainActivity extends Activity {
         }
         return out;
     }
-
-    // ---------------------------------------------------------------- ekstrak
 
     private void doExtract() {
         if (pac == null) { toast("Pilih file .pac dulu"); return; }
@@ -711,7 +685,6 @@ public class MainActivity extends Activity {
                 }
             });
 
-            // XML peta partisi ikut diekstrak bila ada
             String xmlNote = "";
             if (!o.cancelled && !p.xml.isEmpty()) {
                 String base = p.productAlias.isEmpty() ? p.productName : p.productAlias;
@@ -733,7 +706,6 @@ public class MainActivity extends Activity {
                 toast(head + ": " + fo.ok + " partisi diekstrak" + fx);
             });
         }, "pac-extract").start();
-
     }
 
     private void log(String s) {

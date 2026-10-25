@@ -9,21 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * Parser container firmware .pac (Unisoc / Spreadtrum).
- *
- * Layout on-disk (little endian, packed):
- *   [0]           PacHeader  2124 byte
- *   [fileOffset]  PacFileEntry[fileCount]  2580 byte / entri
- *   [xmlStart]    blok XML konfigurasi (UTF-8 / UTF-16)
- *   [dataOffset]  blob biner tiap entri (tidak dikompresi)
- *
- * Catatan penting: field size dan dataOffset adalah 64-bit yang dipecah dua
- * dword 32-bit (high dword di 1532/1536, low dword di 1540/1552). Membaca
- * hanya dword rendah membuat offset salah untuk PAC di atas 4 GiB.
- */
 public class PacParser {
-
     public static final long PAC_MAGIC = 0xFFFAFFFAL;
     public static final int HDR_SIZE = 2124;
     public static final int ENTRY_SIZE = 2580;
@@ -40,23 +26,20 @@ public class PacParser {
         public int omitFlag;
         public int addrCount;
         public final long[] addr = new long[5];
-        // dari XML
+
         public String idName = "";
         public String type = "";
         public long baseAddress = -1;
         public long blockSize = 0;
 
-        /** Entri ini punya data yang bisa diekstrak (partisi, loader, dll). */
         public boolean hasData() {
             return fileFlag != 0 && fileFlag != 2 && size > 0 && dataOffset > 0;
         }
 
-        /** Loader FDL (bukan partisi) — tetap bisa diekstrak. */
         public boolean isLoader() {
             return fileFlag == 257;
         }
 
-        /** Entri ini blok XML, bukan partisi. */
         public boolean isXml() {
             return fileFlag == 2;
         }
@@ -92,11 +75,10 @@ public class PacParser {
         public final List<Entry> entries = new ArrayList<>();
         public Source source;
 
-        /** Byte mentah header (2124 B) — dipakai untuk repack identik. */
         public byte[] rawHeader;
-        /** Byte mentah tabel entri (2580 B x fileCount) — dipakai untuk repack identik. */
+
         public byte[] rawTable;
-        /** Byte mentah blok XML asli, supaya repack tidak mengubah encoding. */
+
         public byte[] rawXml;
 
         public String modeStr() {
@@ -117,22 +99,18 @@ public class PacParser {
             }
         }
 
-        /** Entri yang punya data nyata (bisa diekstrak). */
         public List<Entry> dataEntries() {
             List<Entry> out = new ArrayList<>();
             for (Entry e : entries) if (e.hasData()) out.add(e);
             return out;
         }
 
-        /** Total byte seluruh entri berdata. */
         public long totalDataSize() {
             long t = 0;
             for (Entry e : entries) if (e.hasData()) t += e.size;
             return t;
         }
     }
-
-    // ------------------------------------------------------------------ parse
 
     public static Pac parse(Source src) throws IOException {
         Pac p = new Pac();
@@ -162,7 +140,6 @@ public class PacParser {
                     magic & 0xFFFFFFFFL));
         }
 
-        // --- tabel entri
         if (p.fileCount <= 0 || p.fileCount > 4096 || p.fileOffset <= 0
                 || (long) p.fileOffset + (long) p.fileCount * ENTRY_SIZE > len) {
             throw new IOException("Tabel entri PAC tidak masuk akal (count="
@@ -172,8 +149,6 @@ public class PacParser {
         src.readFully(p.fileOffset, tbl, 0, tbl.length);
         p.rawTable = tbl.clone();
         for (int i = 0; i < p.fileCount; i++) {
-            // Semua offset field bersifat absolut terhadap array, jadi tambahkan base.
-            // (ByteBuffer.wrap(arr, off, len) hanya menggeser position, bukan index getInt)
             int base = i * ENTRY_SIZE;
             ByteBuffer eb = ByteBuffer.wrap(tbl).order(ByteOrder.LITTLE_ENDIAN);
             Entry en = new Entry();
@@ -192,15 +167,12 @@ public class PacParser {
             for (int k = 0; k < 5; k++) {
                 en.addr[k] = eb.getInt(base + 1564 + k * 4) & 0xFFFFFFFFL;
             }
-            // buang entri sampah: tanpa id, tanpa nama, tanpa data
+
             if (!en.id.isEmpty() || !en.name.isEmpty() || en.size > 0) {
                 p.entries.add(en);
             }
         }
 
-        // --- blok XML
-        // PAC lama: XML tepat setelah tabel entri.
-        // PAC baru: XML adalah entri sendiri dengan fileFlag == 2.
         Entry xmlEntry = null;
         for (Entry en : p.entries) {
             if (en.isXml() && en.size > 0) { xmlEntry = en; break; }
@@ -232,8 +204,6 @@ public class PacParser {
         mergeXml(p);
         return p;
     }
-
-    // ------------------------------------------------------------------- util
 
     static String utf16(byte[] buf, int off, int chars) {
         StringBuilder sb = new StringBuilder(chars);
@@ -305,9 +275,6 @@ public class PacParser {
         return n + " B";
     }
 
-    // -------------------------------------------------------------------- xml
-
-    /** Gabungkan metadata XML ke entri PAC (toleran terhadap beda generasi). */
     static void mergeXml(Pac p) {
         if (p.xml == null || p.xml.isEmpty()) return;
         String xml = p.xml;
@@ -369,7 +336,6 @@ public class PacParser {
                 ev = x.next();
             }
         } catch (Exception ignored) {
-            // XML rusak / tak dikenal: tetap jalan dengan data header saja
         }
     }
 

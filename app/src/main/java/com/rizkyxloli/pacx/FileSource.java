@@ -4,9 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
-/** Sumber dari path file biasa (dipakai di luar Android / saat file lokal). */
 public class FileSource implements Source {
-
     private final RandomAccessFile raf;
     private final String name;
 

@@ -8,9 +8,7 @@ import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Sink ke folder biasa — dipakai saat file tujuan berupa path (bukan SAF). */
 public class FileSink implements Engine.Sink {
-
     private final File dir;
     private final Map<String, File> created = new HashMap<>();
 
@@ -32,7 +30,6 @@ public class FileSink implements Engine.Sink {
     public void discard(String fileName) {
         File f = created.remove(fileName);
         if (f != null && f.exists()) {
-            //noinspection ResultOfMethodCallIgnored
             f.delete();
         }
     }

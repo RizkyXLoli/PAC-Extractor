@@ -9,9 +9,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
-/** Isi pengganti dari content:// (file yang dipilih pengguna untuk mengganti partisi). */
 public class UriSrc implements PacWriter.Src, AutoCloseable {
-
     private final ParcelFileDescriptor pfd;
     private final FileInputStream fis;
     private final FileChannel ch;

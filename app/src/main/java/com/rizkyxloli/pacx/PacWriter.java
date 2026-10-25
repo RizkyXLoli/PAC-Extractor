@@ -7,32 +7,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/**
- * Penulis ulang container .pac Unisoc — inti fitur "susun kembali jadi .pac".
- *
- * Cara kerja: header (2124 B) dan tabel entri (2580 B x fileCount) diambil apa
- * adanya dari PAC asli, lalu tiap blob ditulis ulang mengikuti urutan offset
- * aslinya. Ukuran & offset di tabel, ukuran total di header, dan dua CRC 16-bit
- * dihitung ulang.
- *
- * Jarak (gap) antar blob dan sisa byte di ekor file ikut disalin dari PAC asli,
- * sehingga tata letak tetap sama seperti buatan tool resmi. Bila tidak ada isi
- * yang diganti, hasilnya identik byte-per-byte dengan file asli — termasuk kedua
- * CRC. Sudah diuji pada firmware X6725 (7,4 GB).
- *
- * Container saja, tanpa kompresi: setiap blob disalin mentah.
- */
 public class PacWriter {
-
-    /** Keluaran yang bisa ditulis berurutan lalu ditambal di offset tertentu. */
     public interface Out extends Closeable {
         void write(byte[] b, int off, int len) throws IOException;
-        /** Tulis di posisi absolut (untuk menambal field CRC2 di header). */
+
         void patch(long pos, byte[] b, int off, int len) throws IOException;
         void flush() throws IOException;
     }
 
-    /** Sumber isi pengganti (mis. file boot.img hasil patch). */
     public interface Src {
         long length();
         void read(long pos, byte[] b, int off, int len) throws IOException;
@@ -40,7 +22,7 @@ public class PacWriter {
 
     public interface Cb {
         void log(String msg);
-        /** @return false untuk membatalkan */
+
         boolean progress(int pct, String stage, long done, long total);
     }
 
@@ -53,29 +35,19 @@ public class PacWriter {
 
     private static final int BUF = 256 * 1024;
 
-    /**
-     * Susun ulang PAC.
-     *
-     * @param pac          PAC asli (menjadi template header, tabel, dan isi default)
-     * @param replacements indeks entri (entry.index) -> isi baru; kosong = salin asli
-     * @param out          tujuan penulisan
-     */
     public static Result repack(PacParser.Pac pac, Map<Integer, Src> replacements,
                                 Out out, Cb cb) throws IOException {
-
         Result r = new Result();
         int count = pac.fileCount;
         long tableEnd = (long) pac.fileOffset + (long) count * PacParser.ENTRY_SIZE;
         long origLen = pac.source.length();
 
-        // --- urutan tulis: entri berdata, urut offset asli (menjaga layout asli)
         List<PacParser.Entry> order = new ArrayList<>();
         for (PacParser.Entry e : pac.entries) {
             if (e.size > 0 && e.dataOffset > 0) order.add(e);
         }
         order.sort((a, b) -> Long.compare(a.dataOffset, b.dataOffset));
 
-        // --- hitung offset baru, pertahankan jarak antar blob seperti aslinya
         byte[] table = pac.rawTable.clone();
         int n = order.size();
         long[] newOffset = new long[n];
@@ -104,17 +76,15 @@ public class PacWriter {
             if (rep != null) r.replaced++;
         }
 
-        // sisa byte di ekor file asli (bila ada) ikut disalin
         long tailLen = Math.max(0, origLen - prevOrigEnd);
         long tailSrc = prevOrigEnd;
         long total = cursor + tailLen;
 
-        // --- header: ukuran total + CRC1
         byte[] hdr = pac.rawHeader.clone();
         putQword(hdr, 44, 48, total);
         int crc1 = Crc16.arc(hdr, 0, 2120, 0);
         putShort(hdr, 2120, crc1);
-        putShort(hdr, 2122, 0);            // CRC2 ditambal di akhir
+        putShort(hdr, 2122, 0);
 
         if (cb != null) {
             cb.log("menyusun " + n + " bagian, total " + PacParser.human(total)
@@ -137,7 +107,6 @@ public class PacWriter {
                 break;
             }
 
-            // jarak/padding sebelum blob ini — disalin dari aslinya agar identik
             long gl = gapLen[i];
             long gp = gapSrc[i];
             while (gl > 0 && !cancelled) {
@@ -177,7 +146,6 @@ public class PacWriter {
             }
         }
 
-        // ekor file asli
         long tl = tailLen;
         long tp = tailSrc;
         while (tl > 0 && !cancelled) {
@@ -191,7 +159,6 @@ public class PacWriter {
         }
 
         if (!cancelled) {
-            // tambal wCRC2 (offset 2122) setelah seluruh isi diketahui
             byte[] c2 = new byte[] { (byte) (crc2 & 0xFF), (byte) ((crc2 >>> 8) & 0xFF) };
             out.patch(2122, c2, 0, 2);
             out.flush();
@@ -207,15 +174,11 @@ public class PacWriter {
         return r;
     }
 
-    // -------------------------------------------------------------- tulis field
-
-    /** Tulis qword 64-bit yang dipecah dua dword (hi lalu lo). */
     static void putQword(byte[] b, int offHi, int offLo, long v) {
         putInt(b, offHi, (int) ((v >>> 32) & 0xFFFFFFFFL));
         putInt(b, offLo, (int) (v & 0xFFFFFFFFL));
     }
 
-    /** Tambal qword pada tabel entri ke-idx (dasar = idx * 2580). */
     static void setQword(byte[] table, int idx, int relHi, int relLo, long v) {
         int base = idx * PacParser.ENTRY_SIZE;
         putInt(table, base + relHi, (int) ((v >>> 32) & 0xFFFFFFFFL));

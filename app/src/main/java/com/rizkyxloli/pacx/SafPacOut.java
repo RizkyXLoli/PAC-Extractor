@@ -11,16 +11,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
-/**
- * Keluaran .pac ke SAF yang mendukung baca-acak (file biasa di penyimpanan).
- *
- * Tulis berurutan lewat FileChannel, lalu patch() menambal wCRC2 di header.
- * Kalau dokumen tujuan ternyata pipe/stream (tidak bisa seek), patch gagal dan
- * galat diteruskan ke pemanggil — lebih baik gagal jelas daripada menghasilkan
- * .pac dengan CRC salah yang ditolak tool flashing.
- */
 public class SafPacOut implements PacWriter.Out {
-
     private final ParcelFileDescriptor pfd;
     private final FileOutputStream fos;
     private final FileChannel ch;
@@ -73,7 +64,6 @@ public class SafPacOut implements PacWriter.Out {
         }
     }
 
-    /** Hapus file hasil bila penulisan gagal di tengah jalan. */
     public void discard() {
         try { DocumentsContract.deleteDocument(cr, doc); } catch (Exception ignored) { }
     }

@@ -4,22 +4,16 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
 
-/**
- * Mesin ekstraksi PAC — Java murni (tanpa Android) supaya logika yang dikirim
- * di APK bisa diuji apa adanya di JVM.
- */
 public class Engine {
-
     public interface Cb {
         void log(String msg);
-        /** @return false untuk membatalkan */
+
         boolean progress(int pct, String stage, long done, long total);
     }
 
-    /** Tujuan penulisan tiap file hasil ekstrak. */
     public interface Sink {
         OutputStream create(String fileName) throws IOException;
-        /** Dipanggil bila penulisan gagal/batal — hapus file setengah jadi. */
+
         void discard(String fileName);
     }
 
@@ -32,9 +26,6 @@ public class Engine {
 
     private static final int BUF = 256 * 1024;
 
-    // ---------------------------------------------------------------- naming
-
-    /** Nama file hasil ekstrak, memakai nama asli dari entri PAC bila ada. */
     public static String fileNameFor(PacParser.Entry e) {
         String n = e.name != null ? e.name.trim() : "";
         if (n.isEmpty()) n = e.id.trim();
@@ -44,7 +35,6 @@ public class Engine {
         return safeName(n, "entry" + e.index + ".bin");
     }
 
-    /** Buang karakter yang tidak sah untuk nama file di penyimpanan Android. */
     public static String safeName(String raw, String fallback) {
         String s = raw == null ? "" : raw.trim();
         s = s.replace('\\', '_').replace('/', '_').replace(':', '_')
@@ -55,8 +45,6 @@ public class Engine {
         if (s.isEmpty()) s = fallback;
         return s;
     }
-
-    // -------------------------------------------------------------- extract
 
     public static Outcome extract(PacParser.Pac pac, List<PacParser.Entry> list,
                                   Sink sink, Cb cb) {
@@ -131,10 +119,6 @@ public class Engine {
         return total <= 0 ? 0 : (int) Math.min(100, done * 100 / total);
     }
 
-    /**
-     * Pesan galat yang bisa ditindaklanjuti pengguna. Penyebab paling umum saat
-     * menulis partisi raksasa (Super 6-7 GB) adalah ruang penyimpanan habis.
-     */
     public static String friendly(Exception ex) {
         String m = ex.getMessage() == null ? "" : ex.getMessage();
         String low = m.toLowerCase(java.util.Locale.ROOT);

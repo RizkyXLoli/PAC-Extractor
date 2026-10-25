@@ -7,9 +7,7 @@ import android.provider.DocumentsContract;
 import java.io.IOException;
 import java.io.OutputStream;
 
-/** Sink SAF: menulis tiap partisi sebagai file di folder yang dipilih pengguna. */
 public class SafSink implements Engine.Sink {
-
     private final ContentResolver cr;
     private final Uri dir;
     private final java.util.Map<String, Uri> created = new java.util.HashMap<>();
@@ -41,7 +39,6 @@ public class SafSink implements Engine.Sink {
         }
     }
 
-    /** Tulis blok XML PAC sebagai file .xml di folder tujuan. */
     public boolean writeXml(String fileName, String xml) {
         if (xml == null || xml.isEmpty()) return false;
         try {

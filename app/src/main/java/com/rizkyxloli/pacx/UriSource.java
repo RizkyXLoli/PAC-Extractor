@@ -9,12 +9,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
-/**
- * Sumber dari content:// (SAF). Butuh penyimpanan yang mendukung baca acak;
- * file di penyimpanan internal/eksternal memenuhi syarat, pipe/stream tidak.
- */
 public class UriSource implements Source {
-
     private final ParcelFileDescriptor pfd;
     private final FileInputStream fis;
     private final FileChannel ch;
