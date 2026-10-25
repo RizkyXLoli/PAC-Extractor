@@ -92,6 +92,13 @@ public class PacParser {
         public final List<Entry> entries = new ArrayList<>();
         public Source source;
 
+        /** Byte mentah header (2124 B) — dipakai untuk repack identik. */
+        public byte[] rawHeader;
+        /** Byte mentah tabel entri (2580 B x fileCount) — dipakai untuk repack identik. */
+        public byte[] rawTable;
+        /** Byte mentah blok XML asli, supaya repack tidak mengubah encoding. */
+        public byte[] rawXml;
+
         public String modeStr() {
             switch (mode) {
                 case 0: return "Normal";
@@ -135,10 +142,11 @@ public class PacParser {
 
         byte[] h = new byte[HDR_SIZE];
         src.readFully(0, h, 0, HDR_SIZE);
+        p.rawHeader = h.clone();
         ByteBuffer b = ByteBuffer.wrap(h).order(ByteOrder.LITTLE_ENDIAN);
 
-        p.version = utf16(h, 0, 24);
-        p.size = b.getInt(48) & 0xFFFFFFFFL;
+        p.version = utf16(h, 0, 22);
+        p.size = ((long) b.getInt(44) & 0xFFFFFFFFL) << 32 | (b.getInt(48) & 0xFFFFFFFFL);
         p.productName = utf16(h, 52, 256);
         p.productVersion = utf16(h, 564, 256);
         p.fileCount = b.getInt(1076);
@@ -162,6 +170,7 @@ public class PacParser {
         }
         byte[] tbl = new byte[p.fileCount * ENTRY_SIZE];
         src.readFully(p.fileOffset, tbl, 0, tbl.length);
+        p.rawTable = tbl.clone();
         for (int i = 0; i < p.fileCount; i++) {
             // Semua offset field bersifat absolut terhadap array, jadi tambahkan base.
             // (ByteBuffer.wrap(arr, off, len) hanya menggeser position, bukan index getInt)
@@ -200,6 +209,7 @@ public class PacParser {
                 && xmlEntry.dataOffset + xmlEntry.size <= len) {
             byte[] xb = new byte[(int) xmlEntry.size];
             src.readFully(xmlEntry.dataOffset, xb, 0, xb.length);
+            p.rawXml = xb;
             p.xml = decodeXml(xb);
             p.xmlOffset = xmlEntry.dataOffset;
             p.xmlSize = xmlEntry.size;
@@ -212,6 +222,7 @@ public class PacParser {
             if (xmlStart > 0 && xmlEnd > xmlStart && (xmlEnd - xmlStart) < 32L * 1024 * 1024) {
                 byte[] xb = new byte[(int) (xmlEnd - xmlStart)];
                 src.readFully(xmlStart, xb, 0, xb.length);
+                p.rawXml = xb;
                 p.xml = decodeXml(xb);
                 p.xmlOffset = xmlStart;
                 p.xmlSize = xb.length;

@@ -19,6 +19,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -26,6 +27,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -39,6 +41,7 @@ public class MainActivity extends Activity {
 
     private static final int REQ_PAC = 1001;
     private static final int REQ_DIR = 1002;
+    private static final int REQ_REPL = 1003;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private int parseGen = 0;
@@ -48,8 +51,18 @@ public class MainActivity extends Activity {
     private TextView tvLog;
     private ProgressBar progress;
     private Button btnPickPac, btnPickDir, btnExtract, btnAll, btnNone, btnSafe;
-    private LinearLayout listBox;
+    private Button btnModeExtract, btnModeRepack, btnRepack, btnPickRepl;
+    private LinearLayout listBox, repackPanel;
+    private TextView tvRepl;
     private ScrollView listScroll;
+    private EditText etName;
+
+    /** true = mode susun ulang (.pac), false = mode bongkar */
+    private boolean repackMode;
+    /** entri yang isinya akan diganti file pilihan pengguna */
+    private PacParser.Entry replEntry;
+    private Uri replUri;
+    private String replName = "";
 
     private Uri pacUri;
     private Uri dirUri;
@@ -110,6 +123,20 @@ public class MainActivity extends Activity {
         btnPickPac.setOnClickListener(v -> pickPac());
         root.addView(btnPickPac);
 
+        // pemilih mode: bongkar atau susun ulang
+        LinearLayout modes = new LinearLayout(this);
+        modes.setOrientation(LinearLayout.HORIZONTAL);
+        btnModeExtract = mkBtn("Bongkar", 0xFF16A34A);
+        btnModeRepack = mkBtn("Susun ulang", 0xFF334155);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        mlp.setMargins(dp(2), dp(4), dp(2), 0);
+        modes.addView(btnModeExtract, mlp);
+        modes.addView(btnModeRepack, new LinearLayout.LayoutParams(mlp));
+        root.addView(modes);
+        btnModeExtract.setOnClickListener(v -> setMode(false));
+        btnModeRepack.setOnClickListener(v -> setMode(true));
+
         tvFile = new TextView(this);
         tvFile.setTextColor(0xFFB8C4D6);
         tvFile.setTextSize(12);
@@ -167,9 +194,38 @@ public class MainActivity extends Activity {
         btnPickDir.setOnClickListener(v -> pickDir());
         root.addView(btnPickDir);
 
+        // ---- panel khusus susun ulang
+        repackPanel = new LinearLayout(this);
+        repackPanel.setOrientation(LinearLayout.VERTICAL);
+        repackPanel.setVisibility(View.GONE);
+
+        btnPickRepl = mkBtn("Ganti isi partisi (opsional)", 0xFF475569);
+        btnPickRepl.setOnClickListener(v -> pickReplacement());
+        repackPanel.addView(btnPickRepl);
+
+        etName = new EditText(this);
+        etName.setHint("nama file .pac hasil");
+        etName.setTextColor(0xFFE2E8F0);
+        etName.setHintTextColor(0xFF64748B);
+        etName.setTextSize(12);
+        etName.setSingleLine(true);
+        repackPanel.addView(etName);
+
+        tvRepl = new TextView(this);
+        tvRepl.setTextColor(0xFFCBD5E1);
+        tvRepl.setTextSize(11);
+        tvRepl.setText("Belum ada isi yang diganti");
+        repackPanel.addView(tvRepl);
+        root.addView(repackPanel);
+
         btnExtract = mkBtn("3. EKSTRAK", 0xFF16A34A);
         btnExtract.setOnClickListener(v -> doExtract());
         root.addView(btnExtract);
+
+        btnRepack = mkBtn("3. SUSUN ULANG JADI .PAC", 0xFF7C3AED);
+        btnRepack.setOnClickListener(v -> doRepack());
+        btnRepack.setVisibility(View.GONE);
+        root.addView(btnRepack);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
@@ -213,11 +269,167 @@ public class MainActivity extends Activity {
     }
 
     private void updateButtons() {
-        btnExtract.setEnabled(pac != null && dirUri != null);
-        btnExtract.setAlpha(pac != null && dirUri != null ? 1f : 0.45f);
+        boolean ok = pac != null && dirUri != null;
+        btnExtract.setEnabled(ok);
+        btnExtract.setAlpha(ok ? 1f : 0.45f);
+        btnRepack.setEnabled(ok);
+        btnRepack.setAlpha(ok ? 1f : 0.45f);
     }
 
     // ---------------------------------------------------------------- pilih
+
+    private void pickReplacement() {
+        if (pac == null) { toast("Pilih file .pac dulu"); return; }
+        if (replEntry == null) { toast("Ketuk dulu nama partisi di daftar"); return; }
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        try {
+            startActivityForResult(i, REQ_REPL);
+        } catch (Exception e) {
+            toast("Tidak ada aplikasi pemilih file");
+        }
+    }
+
+    private void setMode(boolean repack) {
+        repackMode = repack;
+        btnModeExtract.setBackgroundColor(repack ? 0xFF334155 : 0xFF16A34A);
+        btnModeRepack.setBackgroundColor(repack ? 0xFF7C3AED : 0xFF334155);
+        btnRepack.setVisibility(repack ? View.VISIBLE : View.GONE);
+        btnExtract.setVisibility(repack ? View.GONE : View.VISIBLE);
+        repackPanel.setVisibility(repack ? View.VISIBLE : View.GONE);
+        if (repack && etName.getText().toString().trim().isEmpty() && pac != null) {
+            etName.setText(defaultRepackName());
+        }
+        renderList();
+    }
+
+    /** Nama default hasil: <nama asli tanpa .pac>_repack.pac */
+    private String defaultRepackName() {
+        String n = pacName == null || pacName.isEmpty() ? "firmware" : pacName;
+        if (n.toLowerCase(Locale.US).endsWith(".pac")) n = n.substring(0, n.length() - 4);
+        return n + "_repack.pac";
+    }
+
+    private void doRepack() {
+        if (pac == null) { toast("Pilih file .pac dulu"); return; }
+        if (dirUri == null) { toast("Pilih folder tujuan dulu"); return; }
+        String nm = etName.getText().toString().trim();
+        if (nm.isEmpty()) nm = defaultRepackName();
+        if (!nm.toLowerCase(Locale.US).endsWith(".pac")) nm = nm + ".pac";
+        final String fname = nm;
+
+        final Map<Integer, PacWriter.Src> repl = new HashMap<>();
+        final List<AutoCloseable> open = new ArrayList<>();
+        if (replEntry != null && replUri != null) {
+            try {
+                UriSrc src = new UriSrc(getContentResolver(), replUri);
+                repl.put(replEntry.index, src);
+                open.add(src);
+            } catch (Exception e) {
+                toast("Gagal membuka file pengganti: " + e.getMessage());
+                return;
+            }
+        }
+
+        long need = pac.totalDataSize();
+        new AlertDialog.Builder(this)
+                .setTitle("Susun ulang jadi .pac?")
+                .setMessage("Hasil  : " + fname
+                        + "\nUkuran : sekitar " + PacParser.human(need)
+                        + (repl.isEmpty() ? "\n\nTidak ada isi yang diganti."
+                        : "\n\nIsi diganti: " + replEntry.label())
+                        + "\n\nPastikan ruang kosong di folder tujuan cukup "
+                        + "(sedikitnya sebesar ukuran di atas).")
+                .setNegativeButton("Batal", (d, w) -> closeAll(open))
+                .setPositiveButton("Susun", (d, w) -> startRepack(fname, repl, open))
+                .show();
+    }
+
+    private void startRepack(String fname, Map<Integer, PacWriter.Src> repl,
+                             List<AutoCloseable> open) {
+        cancelFlag = false;
+        progress.setVisibility(View.VISIBLE);
+        progress.setProgress(0);
+        btnRepack.setEnabled(false);
+        btnPickPac.setEnabled(false);
+        log("--- mulai susun ulang " + fname + " ---");
+
+        final Uri dir = dirUri;
+        final ContentResolver cr = getContentResolver();
+        final PacParser.Pac p = pac;
+        final long t0 = System.currentTimeMillis();
+
+        new Thread(() -> {
+            SafPacOut out = null;
+            try {
+                out = new SafPacOut(cr, dir, fname);
+                final SafPacOut fo = out;
+                PacWriter.Result r = PacWriter.repack(p, repl, out, new PacWriter.Cb() {
+                    public void log(String msg) { ui.post(() -> MainActivity.this.log(msg)); }
+                    public boolean progress(int pct, String stage, long done, long total) {
+                        ui.post(() -> {
+                            progress.setProgress(pct);
+                            btnRepack.setText("3. MENYUSUN  " + pct + "%");
+                        });
+                        return !cancelFlag;
+                    }
+                });
+                out.flush();
+                final long bytes = r.bytes;
+                final int cnt = r.written;
+                final boolean cancel = r.cancelled;
+                final long ms = System.currentTimeMillis() - t0;
+                ui.post(() -> {
+                    progress.setVisibility(View.GONE);
+                    btnRepack.setEnabled(true);
+                    btnPickPac.setEnabled(true);
+                    btnRepack.setText("3. SUSUN ULANG JADI .PAC");
+                    if (cancel) {
+                        log("--- DIBATALKAN, file hasil dihapus ---");
+                        fo.discard();
+                        toast("Dibatalkan");
+                    } else {
+                        log("--- SELESAI: " + fname + ", " + PacParser.human(bytes)
+                                + ", " + cnt + " bagian, " + (ms / 1000.0) + " s ---");
+                        toast("PAC tersusun: " + fname);
+                    }
+                    closeAll(open);
+                });
+            } catch (Exception e) {
+                final String m = e.getMessage() == null
+                        ? e.getClass().getSimpleName() : e.getMessage();
+                final SafPacOut f = out;
+                ui.post(() -> {
+                    progress.setVisibility(View.GONE);
+                    btnRepack.setEnabled(true);
+                    btnPickPac.setEnabled(true);
+                    btnRepack.setText("3. SUSUN ULANG JADI .PAC");
+                    log("GAGAL: " + m);
+                    if (f != null) f.discard();
+                    toast("Gagal menyusun PAC: " + m);
+                    closeAll(open);
+                });
+            }
+        }, "pac-repack").start();
+    }
+
+    private void closeAll(List<AutoCloseable> l) {
+        for (AutoCloseable c : l) {
+            try { c.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    private void updateReplLabel() {
+        if (tvRepl == null) return;
+        if (replEntry == null) {
+            tvRepl.setText("Belum ada isi yang diganti");
+        } else if (replUri == null) {
+            tvRepl.setText("Target: " + replEntry.label() + " — pilih file penggantinya");
+        } else {
+            tvRepl.setText("Target: " + replEntry.label() + "\nFile : " + replName);
+        }
+    }
 
     private void pickPac() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -252,6 +464,12 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
             tvFile.setText("File: " + pacName);
             openPac();
+        } else if (req == REQ_REPL) {
+            replUri = u;
+            replName = queryName(u);
+            updateReplLabel();
+            renderList();
+            log("File pengganti: " + replName + " -> " + (replEntry == null ? "?" : replEntry.label()));
         } else if (req == REQ_DIR) {
             dirUri = u;
             try {
@@ -357,9 +575,30 @@ public class MainActivity extends Activity {
 
         boxes.clear();
         listBox.removeAllViews();
+        int autoChecked = renderList();
+        log("Siap: " + nData + " bagian terbaca, " + autoChecked
+                + " dicentang otomatis. Partisi >1 GB tidak dicentang — centang sendiri bila perlu.");
+        updateButtons();
+    }
+
+    /** Bangun daftar partisi; pada mode susun ulang baris bisa diketuk jadi target penggantian. */
+    private int renderList() {
+        boxes.clear();
+        listBox.removeAllViews();
+        if (pac == null) {
+            listScroll.setVisibility(View.GONE);
+            btnAll.setVisibility(View.GONE);
+            btnNone.setVisibility(View.GONE);
+            btnSafe.setVisibility(View.GONE);
+            return 0;
+        }
         int autoChecked = 0;
-        for (PacParser.Entry e : p.entries) {
+        for (PacParser.Entry e : pac.entries) {
             if (!e.hasData()) continue;
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+
             CheckBox cb = new CheckBox(this);
             String line = e.label();
             if (!e.name.isEmpty() && !e.name.equalsIgnoreCase(e.label())) {
@@ -370,22 +609,46 @@ public class MainActivity extends Activity {
             cb.setText(line);
             cb.setTextColor(e.isLoader() ? 0xFFFBBF24 : 0xFFE2E8F0);
             cb.setTextSize(12);
-            // partisi raksasa tidak dicentang otomatis supaya tidak ekstrak 7 GB
-            // tanpa sengaja; pengguna bisa mencentang sendiri
-            boolean huge = e.size > 1024L * 1024 * 1024;
-            cb.setChecked(!huge);
-            if (!huge) autoChecked++;
-            cb.setPadding(dp(2), dp(6), dp(2), dp(6));
-            listBox.addView(cb);
-            boxes.put(e, cb);
+            cb.setPadding(dp(2), dp(6), dp(2), dp(2));
+
+            if (repackMode) {
+                // mode susun ulang: centang tidak dipakai, ketuk = pilih target
+                cb.setChecked(false);
+                cb.setEnabled(false);
+                final PacParser.Entry fe = e;
+                row.setOnClickListener(v -> {
+                    replEntry = fe;
+                    if (replUri != null) { replUri = null; replName = ""; }
+                    updateReplLabel();
+                    renderList();
+                    toast("Target: " + fe.label());
+                });
+                if (e == replEntry) {
+                    TextView mark = new TextView(this);
+                    mark.setText("↳ diganti: " + (replUri == null ? "(pilih file)" : replName));
+                    mark.setTextColor(0xFFA78BFA);
+                    mark.setTextSize(11);
+                    mark.setPadding(dp(24), 0, dp(2), dp(6));
+                    row.addView(mark);
+                } else {
+                    cb.setTextColor(0xFF94A3B8);
+                }
+            } else {
+                // partisi raksasa tidak dicentang otomatis supaya tidak ekstrak 7 GB
+                // tanpa sengaja; pengguna bisa mencentang sendiri
+                boolean huge = e.size > 1024L * 1024 * 1024;
+                cb.setChecked(!huge);
+                if (!huge) autoChecked++;
+                boxes.put(e, cb);
+            }
+            row.addView(cb, 0);
+            listBox.addView(row);
         }
         listScroll.setVisibility(View.VISIBLE);
-        btnAll.setVisibility(View.VISIBLE);
-        btnNone.setVisibility(View.VISIBLE);
-        btnSafe.setVisibility(View.VISIBLE);
-        log("Siap: " + nData + " bagian terbaca, " + autoChecked
-                + " dicentang otomatis. Partisi >1 GB tidak dicentang — centang sendiri bila perlu.");
-        updateButtons();
+        btnAll.setVisibility(repackMode ? View.GONE : View.VISIBLE);
+        btnNone.setVisibility(repackMode ? View.GONE : View.VISIBLE);
+        btnSafe.setVisibility(repackMode ? View.GONE : View.VISIBLE);
+        return autoChecked;
     }
 
     private void setAll(boolean on) {
